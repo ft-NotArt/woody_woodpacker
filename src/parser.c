@@ -1,58 +1,8 @@
 #include "woody.h"
 
-/* Elf64_Ehdr :
-
-unsigned char e_ident[EI_NIDENT]: identification bytes (magic, class, endianness, ABI).
-
-Elf64_Half e_type: object file type (relocatable, executable, shared, core).
-
-Elf64_Half e_machine: target architecture (EM_X86_64 for woody).
-
-Elf64_Word e_version: ELF version (usually EV_CURRENT).
-
-Elf64_Addr e_entry: virtual address of entry point.
-
-Elf64_Off e_phoff: file offset to the program header table.
-
-Elf64_Off e_shoff: file offset to the section header table.
-
-Elf64_Word e_flags: target-specific flags (usually 0 on x86_64).
-
-Elf64_Half e_ehsize: size of this ELF header.
-
-Elf64_Half e_phentsize: size of a single program header entry.
-
-Elf64_Half e_phnum: number of program header entries.
-
-Elf64_Half e_shentsize: size of a single section header entry.
-
-Elf64_Half e_shnum: number of section header entries.
-
-Elf64_Half e_shstrndx: index of the section header containing section names. */
-
-/* Elf64_Phdr :
-
-Elf64_Word p_type: segment type (e.g., PT_LOAD, PT_PHDR, PT_DYNAMIC).
-
-Elf64_Word p_flags: segment flags (PF_R / PF_W / PF_X).
-
-Elf64_Off  p_offset: file offset where the segment starts.
-
-Elf64_Addr p_vaddr: virtual address the segment should be mapped to.
-
-Elf64_Addr p_paddr: physical address (ignored on most modern systems).
-
-Elf64_Xword p_filesz: number of bytes in the file for this segment.
-
-Elf64_Xword p_memsz: size of the segment in memory (can be larger than filesz — BSS).
-
-Elf64_Xword p_align: alignment in file and memory (usually page size for PT_LOAD). */
-
-
 int is_elf(unsigned char *ident) { //see man elf, ident must contain 0x7fELF
 	if ( ident[0] != ELFMAG0 || ident[1] != ELFMAG1
-		|| ident[2] != ELFMAG2 || ident[3] != ELFMAG3)
-		return 0;
+		|| ident[2] != ELFMAG2 || ident[3] != ELFMAG3)	return 0;
 		return 1;
 	}
 	
@@ -269,7 +219,6 @@ int main(int ac, char **av) {
 	}
 
 	Elf64_Ehdr *ehdr = (Elf64_Ehdr *)elf.map;
-	Elf64_Addr old_entry = ehdr->e_entry;
 	Elf64_Phdr *exe_seg = find_exec(ehdr, elf.map);
 	if (!exe_seg) {
 		printf("No executable segment\n");
@@ -290,8 +239,13 @@ int main(int ac, char **av) {
 		return 1;
 	}
 
+	unsigned char *saved_key = strdup(key);
+	// stub virtual address = end of original exec PT_LOAD
+	Elf64_Addr stub_vaddr = exe_seg->p_vaddr + exe_seg->p_filesz;
+	// pack‑time delta = from stub start to original entry
+	Elf64_Addr old_entry_delta = ehdr->e_entry - stub_vaddr;
 	// encrypt(payload_buff, payload_size, key, key_size);
-	// add_stub(&payload_buff, &payload_size, key, key_size, old_entry);
+	// add_stub(&payload_buff, &payload_size, saved_key, key_size, old_entry_delta);
 	// build_woody(&elf, exe_seg, payload_buff, payload_size);
 	free(payload_buff);
 	if (ac == 2 && key)
