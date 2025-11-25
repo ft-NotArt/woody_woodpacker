@@ -22,6 +22,7 @@ ASFLAGS			=	-f elf64 -g
 C_FILES			=	parser
 
 ASM_FILES		=	encrypt						\
+					decrypt						\
 					ft_strlen
 
 C_SRC			=	$(addprefix src/, $(addsuffix .c, $(C_FILES)))

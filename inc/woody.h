@@ -11,3 +11,4 @@
 
 
 void	encrypt(char *to_encrypt, size_t encr_size, char *key, size_t key_size);
+void	decrypt(char *to_decrypt, size_t decr_size, char *key, size_t key_size);
