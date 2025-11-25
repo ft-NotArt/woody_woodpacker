@@ -1,28 +1,59 @@
-NAME	:= woody_woodpacker
+# COLORS
 
-CC		:= cc
-CFLAGS	:= -Wall -Wextra -Werror
+PURPLE			=	\x1b[0m\x1b[38;2;153;37;190m
+LIGHT_PURPLE	=	\x1b[0m\x1b[38;2;184;102;210m
+DARK_PURPLE		=	\x1b[1m\x1b[38;2;107;26;133m
 
-SRC_DIR	:= src
-INC_DIR	:= inc
+# TARGET
 
-SRC		:= $(SRC_DIR)/parser.c
-OBJ		:= $(SRC:.c=.o)
+NAME			=	woody_woodpacker
 
-all: $(NAME)
+# FLAGS
 
-$(NAME): $(OBJ)
-	$(CC) $(CFLAGS) -I$(INC_DIR) $^ -o $@
+MAKEFLAGS		+=	-s
+CC				=	gcc
+# CFLAGS			=	-Wall -Werror -Wextra -g -Iinc
+CFLAGS			=	-g -Iinc
+AS				=	nasm
+ASFLAGS			=	-f elf64 -g
+
+# FILES
+
+C_FILES			=	parser
+
+ASM_FILES		=	encrypt						\
+					ft_strlen
+
+C_SRC			=	$(addprefix src/, $(addsuffix .c, $(C_FILES)))
+ASM_SRC			=	$(addprefix src/, $(addsuffix .s, $(ASM_FILES)))
+
+C_OBJ			=	$(C_SRC:.c=.o)
+ASM_OBJ			=	$(ASM_SRC:.s=.o)
+
+OBJ				=	$(C_OBJ) $(ASM_OBJ)
+
+# RULES
+
+all				:	$(NAME)
+
+$(NAME)			:	$(OBJ)
+					$(CC) $(CFLAGS) $^ -o $@
+					echo -e '$(LIGHT_PURPLE) \tCompiled$(DARK_PURPLE) $@'
 
 %.o: %.c
-	$(CC) $(CFLAGS) -I$(INC_DIR) -c $< -o $@
+	$(CC) $(CFLAGS) -c $< -o $@
 
-clean:
-	rm -f $(OBJ)
+%.o: %.s
+	nasm -f elf64 $< -o $@
 
-fclean: clean
-	rm -f $(NAME)
+clean			:
+					$(RM) $(OBJ)
+					echo -e '$(LIGHT_PURPLE) \tCleaned$(PURPLE) $(OBJ)'
 
-re: fclean all
+fclean			:	clean
+					$(RM) $(NAME)
+					echo -e '$(LIGHT_PURPLE) \tCleaned$(DARK_PURPLE) $(NAME)'
 
-.PHONY: all clean fclean re
+re				:	fclean all
+
+.PHONY			=	all clean fclean re
