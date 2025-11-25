@@ -22,8 +22,8 @@ encrypt:		; void	encrypt(char *to_encrypt, size_t encr_size, char *key, size_t k
 		
 		;key[i % key_size] = (key[i % key_size] + data[i] + i) ^ 0xA5
 		mov al, [rdi + r8]
-		add [rdx + r9], al
-		add [rdx + r9], r8
+		add byte[rdx + r9], al
+		add byte[rdx + r9], r8b
 		xor byte[rdx + r9], 0xA5	; 0xA5 = 1010 0101 (mask)
 
 		inc r8
