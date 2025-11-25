@@ -1,6 +1,29 @@
 section .text
+global _start
+_start:
+	; writes "....WOODY...."
+	mov rdi, 1	; STD_OUT
+	mov rsi, woody
+	mov rdx, 14 ; strlen(woody)
+	mov rax, 1
+	syscall
 
-global decrypt
+	; decrypts the base binary
+	call get_rsp	; get the address we're at now
+	add rax, 0x42014201
+	mov rbx, rax	; save this value for later since it's where we jump to
+	mov rdi, rax
+	mov rsi, 0x42024202
+	mov rdx, 0x42034203
+	mov rcx, 0x42044204
+	call decrypt
+
+	jmp rbx
+	ret
+
+	get_rsp:
+		mov rax, [rsp]
+		ret
 
 decrypt:		; void	decrypt(char *to_decrypt, size_t encr_size, char *key, size_t key_size)
 	; make sure no pointers are NULL
@@ -26,7 +49,7 @@ decrypt:		; void	decrypt(char *to_decrypt, size_t encr_size, char *key, size_t k
 		;key[i % key_size] = (key[i % key_size] + data[i](before decrypt) + i) ^ 0xA5
 		mov al, r10b
 		add [rdx + r9], al
-		add [rdx + r9], r8
+		add [rdx + r9], r8b
 		xor byte[rdx + r9], 0xA5	; 0xA5 = 1010 0101 (mask)
 
 		inc r8
@@ -38,3 +61,6 @@ decrypt:		; void	decrypt(char *to_decrypt, size_t encr_size, char *key, size_t k
 
 	.end:
 		ret
+
+; We can't use section data properly using the stub method with xxd, so we put data here instead
+woody: db "....WOODY....\n", 0
