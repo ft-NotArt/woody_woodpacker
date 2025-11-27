@@ -2,6 +2,10 @@
 #include "stub.h"
 
 size_t new_stub_len;
+
+// Forward declaration
+char *replace_mock_var(Elf64_Addr encrypted_vaddr, Elf64_Addr original_entry, Elf64_Addr stub_vaddr, size_t encrypt_size, unsigned char *key, size_t key_size);
+
 int is_elf(unsigned char *ident) { //see man elf, ident must contain 0x7fELF
 	if ( ident[0] != ELFMAG0 || ident[1] != ELFMAG1
 		|| ident[2] != ELFMAG2 || ident[3] != ELFMAG3)	return 0;
@@ -143,16 +147,23 @@ unsigned char *build_encrypt_buffer(t_elf *elf, Elf64_Phdr *exe_seg, size_t *out
 	return to_encrypt;
 }
 
-int build_woody(t_elf *elf, Elf64_Phdr *exe_seg, unsigned char *encrypt_buff, size_t encrypt_size, char *new_stub)
+int build_woody(t_elf *elf, Elf64_Phdr *exe_seg, Elf64_Addr encrypted_vaddr, Elf64_Addr original_entry, unsigned char *encrypt_buff __attribute__((unused)), size_t encrypt_size, unsigned char *key, size_t key_size)
 {
-	// append segment (encrypted segment + stub) at the end of PT_LOAD.
-
-	Elf64_Off seg_off = exe_seg->p_offset;
-	size_t old_filesz = exe_seg->p_filesz;
-	size_t old_memsz = exe_seg->p_memsz;
-	Elf64_Off insert_off = seg_off + old_filesz; // offset where we append
+	// PT_NOTE to PT_LOAD injection - append payload to EOF
+	// Convert PT_NOTE segment to PT_LOAD pointing to our code
+	(void)exe_seg;
 	size_t old_size = elf->size;
-	size_t new_size = old_size + encrypt_size + new_stub_len;
+	
+	// Calculate stub_vaddr with correct alignment FIRST
+	size_t page_size = 0x1000;
+	size_t offset_in_page = old_size % page_size;
+	Elf64_Addr stub_vaddr = 0x800000 + offset_in_page;  // Match offset alignment
+	
+	// NOW create the stub with all the correct values
+	char *new_stub = replace_mock_var(encrypted_vaddr, original_entry, stub_vaddr, encrypt_size, key, key_size);
+	
+	size_t payload_size = new_stub_len;  // Only the stub, no encryption for now
+	size_t new_size = old_size + payload_size;
 
 	unsigned char *new_img = malloc(new_size);
 	if (!new_img) {
@@ -160,42 +171,58 @@ int build_woody(t_elf *elf, Elf64_Phdr *exe_seg, unsigned char *encrypt_buff, si
 		return 1;
 	}
 
-	// copy bytes before insertion point
-	memcpy(new_img, elf->map, insert_off);
-	size_t payload_size = encrypt_size + new_stub_len;
-	unsigned char *payload_buff = malloc(payload_size);
-	memcpy(payload_buff, encrypt_buff, encrypt_size);
-	memcpy(payload_buff + encrypt_size, new_stub, new_stub_len);
-	// copy appended payload (encrypted segment + stub)
-	memcpy(new_img + insert_off, payload_buff, payload_size);
-	// copy tail of original file after the insertion point
-	size_t tail_size = old_size - insert_off;
-	memcpy(new_img + insert_off + payload_size,
-		(unsigned char *)elf->map + insert_off, tail_size);
+	// Copy entire original file
+	memcpy(new_img, elf->map, old_size);
+	
+	// NOW encrypt the executable segment in the new image
+	// The stub will decrypt it at runtime before jumping to it
+	memcpy(new_img + exe_seg->p_offset, encrypt_buff, encrypt_size);
+	
+	// Append just the stub at EOF
+	memcpy(new_img + old_size, new_stub, new_stub_len);
 
-	// patch ELF headers for the new_img
+	// Patch ELF headers in the new image
 	Elf64_Ehdr *nehdr = (Elf64_Ehdr *)new_img;
 	Elf64_Phdr *nphdr = (Elf64_Phdr *)(new_img + nehdr->e_phoff);
 
-	// Set shit to 0 pour faire belek
+	// Zero out section headers - they're now invalid after our modifications
 	nehdr->e_shoff = 0;
 	nehdr->e_shnum = 0;
 	nehdr->e_shstrndx = SHN_UNDEF;
 
-	/* increase size of the exec segment and bump p_offset of any segment 
-	that starts after the exec PT_LOAD */
+	// Find PT_NOTE segment and convert it to PT_LOAD (just for stub, not encrypted data)
+	// stub_vaddr was calculated earlier
+	int found_note = 0;
+	
+	int note_count = 0;
 	for (int i = 0; i < nehdr->e_phnum; i++) {
 		Elf64_Phdr *p = &nphdr[i];
-		if (p->p_type == PT_LOAD && (p->p_flags & PF_X) && p->p_offset == seg_off) {
-			p->p_filesz = old_filesz + payload_size;
-			p->p_memsz  = old_memsz  + payload_size;
-		} else if (p->p_offset > seg_off) {
-			p->p_offset += payload_size;
+		if (p->p_type == PT_NOTE) {
+			note_count++;
+			// Skip first NOTE (likely GNU_PROPERTY with security features)
+			// Convert the SECOND PT_NOTE (usually build-id, safe to remove)
+			if (note_count == 2 && !found_note) {
+				// Convert PT_NOTE to PT_LOAD
+				p->p_type = PT_LOAD;
+				p->p_flags = PF_R | PF_X | PF_W;  // RWX for stub execution
+				p->p_offset = old_size;    // Points to stub at EOF
+				p->p_vaddr = stub_vaddr;
+				p->p_paddr = stub_vaddr;
+				p->p_filesz = new_stub_len;  // Only the stub!
+				p->p_memsz = new_stub_len;
+				p->p_align = 0x1000;
+				found_note = 1;
+				break;
+			}
 		}
 	}
+	
+	if (!found_note) {
+		printf("ERROR: No PT_NOTE segment found!\n");
+		free(new_img);
+		return 1;
+	}
 
-	// update entry point so that it jumps to beginning of the appended part
-	Elf64_Addr stub_vaddr = exe_seg->p_vaddr + old_filesz;
 	nehdr->e_entry = stub_vaddr;
 	int out = open("woody", O_WRONLY | O_CREAT | O_TRUNC, 0755);
 	if (out < 0) {
@@ -203,7 +230,8 @@ int build_woody(t_elf *elf, Elf64_Phdr *exe_seg, unsigned char *encrypt_buff, si
 		free(new_img);
 		return 1;
 	}
-	if (write(out, new_img, new_size) != (ssize_t)new_size) {
+	ssize_t written = write(out, new_img, new_size);
+	if (written != (ssize_t)new_size) {
 		perror("write woody");
 		close(out);
 		free(new_img);
@@ -211,15 +239,16 @@ int build_woody(t_elf *elf, Elf64_Phdr *exe_seg, unsigned char *encrypt_buff, si
 	}
 	close(out);
 	free(new_img);
+	free(new_stub);
 	return 0;
 }
-char *replace_mock_var(Elf64_Addr old_entry_delta, size_t encrypt_size, unsigned char *key, size_t key_size) {
+char *replace_mock_var(Elf64_Addr encrypted_vaddr, Elf64_Addr original_entry, Elf64_Addr stub_vaddr, size_t encrypt_size, unsigned char *key, size_t key_size) {
 	uint8_t *long_to_insert;
 
 	new_stub_len = stub_bin_len + key_size - 4;
 	char *key_placeholder = memmem(stub_bin, stub_bin_len, "\x03\x42\x03\x42", 4);
 
-	size_t key_offset = key_placeholder - stub_bin;
+	size_t key_offset = key_placeholder - (char *)stub_bin;
 
 	char *new_stub = malloc(new_stub_len);
 
@@ -230,15 +259,30 @@ char *replace_mock_var(Elf64_Addr old_entry_delta, size_t encrypt_size, unsigned
 	/* Copy rest of stub after placeholder */
 	memcpy(new_stub + key_offset + key_size, stub_bin + key_offset + 4, stub_bin_len - key_offset - 4);
 
-	/* Patch other placeholders */
-	long_to_insert = memmem(new_stub, new_stub_len, "\x01\x42\x01\x42", 4);
-	memcpy(long_to_insert, &old_entry_delta, 4);
+	/* Patch 8-byte placeholder for encrypted data vaddr */
+	long_to_insert = memmem(new_stub, new_stub_len, "\x01\x42\x01\x42\x01\x42\x01\x42", 8);
+	if (long_to_insert)
+		memcpy(long_to_insert, &encrypted_vaddr, 8);
 
+	/* Patch 4-byte placeholder for encrypt size */
 	long_to_insert = memmem(new_stub, new_stub_len, "\x02\x42\x02\x42", 4);
-	memcpy(long_to_insert, &encrypt_size, 4);
+	if (long_to_insert)
+		memcpy(long_to_insert, &encrypt_size, 4);
 
+	/* Patch 4-byte placeholder for key size */
 	long_to_insert = memmem(new_stub, new_stub_len, "\x04\x42\x04\x42", 4);
-	memcpy(long_to_insert, &key_size, 4);
+	if (long_to_insert)
+		memcpy(long_to_insert, &key_size, 4);
+
+	/* Patch 8-byte placeholder for original entry point */
+	long_to_insert = memmem(new_stub, new_stub_len, "\x05\x42\x05\x42\x05\x42\x05\x42", 8);
+	if (long_to_insert)
+		memcpy(long_to_insert, &original_entry, 8);
+
+	/* Patch 8-byte placeholder for stub_vaddr */
+	long_to_insert = memmem(new_stub, new_stub_len, "\x06\x42\x06\x42\x06\x42\x06\x42", 8);
+	if (long_to_insert)
+		memcpy(long_to_insert, &stub_vaddr, 8);
 
 	return new_stub;
 }
@@ -268,7 +312,6 @@ int main(int ac, char **av) {
 			free(key);
 		return 1;
 	}
-
 	size_t encrypt_size;
 	unsigned char *encrypt_buff = build_encrypt_buffer(&elf, exe_seg, &encrypt_size);
 	if (!encrypt_buff) {
@@ -281,15 +324,16 @@ int main(int ac, char **av) {
 
 	unsigned char *saved_key = malloc(key_size);
 	memcpy(saved_key, key, key_size);
-	// stub virtual address = end of original exec PT_LOAD
-	Elf64_Addr stub_vaddr = exe_seg->p_vaddr + exe_seg->p_filesz;
-	// pack‑time delta = from stub start to original entry
-	Elf64_Addr old_entry_delta = ehdr->e_entry - stub_vaddr;
-	encrypt(encrypt_buff, encrypt_size, key, key_size);
-	char *new_stub = replace_mock_var(old_entry_delta, encrypt_size, saved_key, key_size);
-	build_woody(&elf, exe_seg, encrypt_buff, encrypt_size, new_stub);
 	
-	free(new_stub);
+	// Save original entry point and encrypted segment virtual address
+	Elf64_Addr original_entry = ehdr->e_entry;
+	Elf64_Addr encrypted_vaddr = exe_seg->p_vaddr;
+	
+	encrypt(encrypt_buff, encrypt_size, key, key_size);
+	
+	// build_woody now creates the stub internally with correct stub_vaddr
+	build_woody(&elf, exe_seg, encrypted_vaddr, original_entry, encrypt_buff, encrypt_size, saved_key, key_size);
+	
 	free(encrypt_buff);
 	if (ac == 2 && key)
 		free(key);
