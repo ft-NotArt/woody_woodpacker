@@ -151,7 +151,6 @@ int build_woody(t_elf *elf, Elf64_Phdr *exe_seg, Elf64_Addr encrypted_vaddr, Elf
 {
 	// PT_NOTE to PT_LOAD injection - append payload to EOF
 	// Convert PT_NOTE segment to PT_LOAD pointing to our code
-	(void)exe_seg;
 	size_t old_size = elf->size;
 	
 	// Calculate stub_vaddr with correct alignment FIRST
@@ -173,11 +172,11 @@ int build_woody(t_elf *elf, Elf64_Phdr *exe_seg, Elf64_Addr encrypted_vaddr, Elf
 
 	// Copy entire original file
 	memcpy(new_img, elf->map, old_size);
-	
-	// NOW encrypt the executable segment in the new image
+	int offset = exe_seg->p_offset == 0 ? 0x1000 : exe_seg->p_offset;
+	// encrypt the executable segment in the new image
 	// The stub will decrypt it at runtime before jumping to it
-	memcpy(new_img + exe_seg->p_offset, encrypt_buff, encrypt_size);
-	
+	memcpy(new_img + offset, encrypt_buff, encrypt_size);
+
 	// Append just the stub at EOF
 	memcpy(new_img + old_size, new_stub, new_stub_len);
 
@@ -194,14 +193,10 @@ int build_woody(t_elf *elf, Elf64_Phdr *exe_seg, Elf64_Addr encrypted_vaddr, Elf
 	// stub_vaddr was calculated earlier
 	int found_note = 0;
 	
-	int note_count = 0;
 	for (int i = 0; i < nehdr->e_phnum; i++) {
 		Elf64_Phdr *p = &nphdr[i];
 		if (p->p_type == PT_NOTE) {
-			note_count++;
-			// Skip first NOTE (likely GNU_PROPERTY with security features)
-			// Convert the SECOND PT_NOTE (usually build-id, safe to remove)
-			if (note_count == 2 && !found_note) {
+			if (!found_note) {
 				// Convert PT_NOTE to PT_LOAD
 				p->p_type = PT_LOAD;
 				p->p_flags = PF_R | PF_X | PF_W;  // RWX for stub execution
