@@ -1,14 +1,14 @@
 #define _GNU_SOURCE // for memmem
-#include <stdio.h>
+#include <unistd.h>
 #include <stdlib.h>
+#include <stdio.h>
+#include <stdbool.h>
 #include <string.h>
-#include <errno.h>
-#include <sys/types.h>
 #include <sys/stat.h>
 #include <fcntl.h>
-#include <unistd.h>
 #include <sys/mman.h>
 #include <elf.h>
+
 
 typedef struct s_elf {
 	void   *map;
@@ -49,6 +49,8 @@ Elf64_Half e_shentsize: size of a single section header entry.
 Elf64_Half e_shnum: number of section header entries.
 
 Elf64_Half e_shstrndx: index of the section header containing section names. */
+
+
 
 /* Elf64_Phdr :
 

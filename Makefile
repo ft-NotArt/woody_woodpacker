@@ -21,10 +21,9 @@ ASFLAGS			=	-f elf64 -g
 
 C_FILES			=	woody
 
-ASM_FILES		=	encrypt						\
-					ft_strlen
+ASM_FILES		=	encrypt
 
-STUB_FILES		=	stub						\
+STUB_FILES		=	stub
 
 C_SRC			=	$(addprefix src/, $(addsuffix .c, $(C_FILES)))
 ASM_SRC			=	$(addprefix src/, $(addsuffix .s, $(ASM_FILES)))
